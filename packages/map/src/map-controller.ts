@@ -1121,6 +1121,8 @@ export class MapController {
 
   applyView(view: MapViewState): void {
     if (!this.map) return;
+    // jumpTo stop()s drag handlers, so skip while the user is still panning.
+    if (this.map.dragPan.isActive() || this.map.dragRotate.isActive()) return;
     this.map.jumpTo(constrainMapView(view, this.mapPreferences, this.map));
   }
 

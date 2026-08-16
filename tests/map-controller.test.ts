@@ -180,6 +180,9 @@ function makeFakeMap(initialBasemapLayers: string[] = ["basemap-bg"]): {
     // A laid-out viewport, so the camera helpers that scale with the canvas
     // (the globe-safe fit ceiling) have a real size to work from.
     getCanvas: () => ({ clientWidth: 576, clientHeight: 648 }),
+    jumpTo: record("jumpTo"),
+    dragPan: { isActive: () => false },
+    dragRotate: { isActive: () => false },
     flyTo: record("flyTo"),
     fitBounds: record("fitBounds"),
     cameraForBounds: (...args: unknown[]) => {
@@ -866,6 +869,40 @@ describe("MapController camera and query helpers", () => {
       pitch: 0,
       bbox: [-120, 30, -80, 50],
     });
+  });
+
+  it("does not jumpTo while the user is dragging, so inertia can be grabbed", () => {
+    const { map, fake } = makeFakeMap();
+    (map as { dragPan: { isActive: () => boolean } }).dragPan = { isActive: () => true };
+    const controller = controllerWith(map);
+
+    controller.applyView({
+      center: [12, 48],
+      zoom: 6,
+      bearing: 0,
+      pitch: 0,
+    });
+
+    assert.ok(
+      !fake.calls.some((c) => c.method === "jumpTo"),
+      "jumpTo would Camera.stop() the in-progress drag",
+    );
+  });
+
+  it("jumps when the user is not dragging", () => {
+    const { map, fake } = makeFakeMap();
+    const controller = controllerWith(map);
+
+    controller.applyView({
+      center: [12, 48],
+      zoom: 6,
+      bearing: 0,
+      pitch: 0,
+    });
+
+    const jump = fake.calls.find((c) => c.method === "jumpTo");
+    assert.ok(jump);
+    assert.deepEqual((jump.args[0] as { center: [number, number] }).center, [12, 48]);
   });
 
   it("normalizes the projection to globe/mercator", () => {
