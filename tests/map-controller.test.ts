@@ -889,6 +889,23 @@ describe("MapController camera and query helpers", () => {
     );
   });
 
+  it("does not jumpTo while the user is rotating", () => {
+    const { map, fake } = makeFakeMap();
+    (map as { dragRotate: { isActive: () => boolean } }).dragRotate = {
+      isActive: () => true,
+    };
+    const controller = controllerWith(map);
+
+    controller.applyView({
+      center: [12, 48],
+      zoom: 6,
+      bearing: 0,
+      pitch: 0,
+    });
+
+    assert.ok(!fake.calls.some((c) => c.method === "jumpTo"));
+  });
+
   it("jumps when the user is not dragging", () => {
     const { map, fake } = makeFakeMap();
     const controller = controllerWith(map);
