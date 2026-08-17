@@ -9,6 +9,7 @@ import {
   assetFormat,
   connectStac,
   horizontalBbox,
+  isAzureBlobHref,
   isVisualizableAsset,
   itemBbox,
   loadStacIndex,
@@ -25,6 +26,7 @@ import {
 } from "./stac-api";
 import { buildCatalogTree } from "./stac-catalog-tree";
 import { el, setDisabled } from "../panel-dom";
+import { addVectorLayerFromUrl } from "./maplibre-vector";
 
 export const STAC_PLUGIN_ID = "geolibre-stac-catalogs";
 const PANEL_ID = STAC_PLUGIN_ID;
@@ -219,7 +221,8 @@ let labels: StacLabels = {
   zoom: "Zoom",
   add: "Add",
   download: "Download",
-  addUnsupported: "Only GeoTIFF/COG, GeoJSON, and PMTiles assets can be added to the map",
+  addUnsupported:
+    "Only GeoTIFF/COG, GeoJSON, GeoParquet, and PMTiles assets can be added to the map",
   addFailed: "Could not add asset",
   addNoSourceLayers: "This archive lists no layers to draw",
   cogUnsupported: "This GeoLibre host cannot visualize remote GeoTIFF assets",
@@ -538,6 +541,47 @@ function assetOptionLabel(key: string, asset: StacAsset): string {
   return `${assetLabel(key, asset)} — ${assetFormatLabel(asset)}${addability}`;
 }
 
+type SasSigner = { signUrl(url: string, collectionId: string): Promise<string> };
+let sasManager: Promise<SasSigner> | null = null;
+
+function planetaryComputerSigner(): Promise<SasSigner> {
+  sasManager ??= import("maplibre-gl-planetary-computer")
+    .then((module) => new module.SASTokenManager())
+    .catch((error) => {
+      // Don't let one failed import disable signing for the rest of the session.
+      sasManager = null;
+      throw error;
+    });
+  return sasManager;
+}
+
+/**
+ * Planetary Computer serves several collections — most of the GeoParquet ones — from private
+ * containers that answer 409 without a SAS token, while others (NAIP) read fine anonymously.
+ * Tokens are per-collection and expire within the hour, so they are minted when the asset is
+ * added rather than when the item is parsed, and the upstream manager caches them. Anything
+ * that is not an Azure blob, or that cannot be signed, is read unsigned.
+ *
+ * Only the GeoParquet path signs, because that is the one this branch made addable and it cannot
+ * read a private container at all unsigned. PMTiles and COG read unsigned exactly as they did
+ * before, rather than gaining a token they never had.
+ *
+ * Every one of these formats persists whatever URL it is handed: PMTiles and COG through the
+ * store layer they create, and the vector control through `createVectorStoreLayer`, which records
+ * the URL as both `source.url` and `sourcePath`. A project saved with a signed GeoParquet layer
+ * therefore holds a token that `restoreVectorLayers` replays as-is and never re-signs, so the
+ * layer stops reloading once the token lapses (about an hour). Fixing that properly means minting
+ * the token per request, or re-signing on restore, rather than baking one in at add time.
+ */
+async function readableHref(item: StacItem, href: string): Promise<string> {
+  if (!isAzureBlobHref(href) || !item.collection) return href;
+  try {
+    return await (await planetaryComputerSigner()).signUrl(href, item.collection);
+  } catch {
+    return href;
+  }
+}
+
 async function visualizeAsset(
   item: StacItem,
   key: string,
@@ -564,6 +608,13 @@ async function visualizeAsset(
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const data = (await response.json()) as FeatureCollection;
       appRef.addGeoJsonLayer(name, data, asset.href);
+      return;
+    }
+    case "parquet": {
+      if (!appRef) throw new Error(labels.addFailed);
+      if (!(await addVectorLayerFromUrl(appRef, await readableHref(item, asset.href), { name }))) {
+        throw new Error(labels.addFailed);
+      }
       return;
     }
     case "cog": {

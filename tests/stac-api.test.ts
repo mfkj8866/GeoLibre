@@ -5,6 +5,7 @@ import {
   connectStac,
   assetDisplayFormat,
   assetFormat,
+  isAzureBlobHref,
   isVisualizableAsset,
   itemBbox,
   openCatalogNode,
@@ -28,6 +29,78 @@ test("browserAssetHref converts anonymous S3 STAC assets to fetchable HTTPS URLs
     browserAssetHref("./data.tif", "https://example.com/catalog/item.json"),
     "https://example.com/catalog/data.tif",
   );
+});
+
+test("browserAssetHref resolves Azure hrefs against the account named beside them", () => {
+  // abfs names the container first and carries the account in table:storage_options, so the
+  // account is prepended as the host rather than read out of the href (GeoLibre#1976).
+  assert.equal(
+    browserAssetHref(
+      "abfs://us-census/2020/cb_2020_us_state_500k.parquet",
+      "https://planetarycomputer.microsoft.com/api/stac/v1/",
+      "ai4edataeuwest",
+    ),
+    "https://ai4edataeuwest.blob.core.windows.net/us-census/2020/cb_2020_us_state_500k.parquet",
+  );
+  assert.equal(
+    browserAssetHref("az://container/a.parquet", "https://example.com/", "acct"),
+    "https://acct.blob.core.windows.net/container/a.parquet",
+  );
+  // With no account there is nothing to resolve against, so the href is left alone rather
+  // than guessed at.
+  assert.equal(
+    browserAssetHref("abfs://us-census/2020/x.parquet", "https://example.com/"),
+    "abfs://us-census/2020/x.parquet",
+  );
+});
+
+test("browserAssetHref reads the canonical ABFS form, which names its own account", () => {
+  // abfs[s]://<container>@<account>.dfs.core.windows.net/<path> carries both parts, so it
+  // resolves without storage options and must not be read as if the host were the container.
+  assert.equal(
+    browserAssetHref(
+      "abfss://container@acct.dfs.core.windows.net/dir/a.parquet",
+      "https://x.test/",
+    ),
+    "https://acct.blob.core.windows.net/container/dir/a.parquet",
+  );
+  // An account named beside it does not override the one the URI states.
+  assert.equal(
+    browserAssetHref(
+      "abfs://container@acct.dfs.core.windows.net/a.parquet",
+      "https://x.test/",
+      "other",
+    ),
+    "https://acct.blob.core.windows.net/container/a.parquet",
+  );
+  // The canonical host with no container is not resolvable, so it is left alone.
+  assert.equal(
+    browserAssetHref("abfss://acct.dfs.core.windows.net/a.parquet", "https://x.test/"),
+    "abfss://acct.dfs.core.windows.net/a.parquet",
+  );
+});
+
+test("an Azure asset with nothing to resolve it against is named but not offered", () => {
+  // browserAssetHref leaves the href alone when no account names the container, and none of the
+  // readers behind Add speak abfs://, so the panel must not enable Add for it.
+  const asset = { href: "abfs://us-census/2020/x.parquet", type: "application/x-parquet" };
+  assert.equal(assetDisplayFormat(asset), "parquet");
+  assert.equal(assetFormat(asset), null);
+  assert.equal(isVisualizableAsset(asset), false);
+  // Once resolved, the same asset is addable.
+  const resolved = { ...asset, href: browserAssetHref(asset.href, "https://x.test/", "acct") };
+  assert.equal(assetFormat(resolved), "parquet");
+});
+
+test("isAzureBlobHref recognizes only blob-storage URLs", () => {
+  assert.equal(
+    isAzureBlobHref("https://ai4edataeuwest.blob.core.windows.net/us-census/x.parquet"),
+    true,
+  );
+  assert.equal(isAzureBlobHref("https://example.com/x.parquet"), false);
+  // A host merely ending in the suffix as a substring must not match.
+  assert.equal(isAzureBlobHref("https://notblob.core.windows.net.evil.com/x"), false);
+  assert.equal(isAzureBlobHref("not a url"), false);
 });
 
 test("connectStac discovers relative API links and collections", async () => {
@@ -667,6 +740,86 @@ test("a tree selection narrows where the search starts without voiding the colle
   );
 });
 
+test("a searched item's Azure asset arrives resolved against its storage options", async () => {
+  const fetcher = (async () =>
+    jsonResponse({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "2020-census-states",
+          geometry: null,
+          collection: "us-census",
+          properties: { datetime: "2021-08-01T00:00:00Z" },
+          assets: {
+            data: {
+              href: "abfs://us-census/2020/cb_2020_us_state_500k.parquet",
+              type: "application/x-parquet",
+              "table:storage_options": { account_name: "ai4edataeuwest" },
+            },
+          },
+        },
+      ],
+      links: [],
+    })) as typeof fetch;
+  const result = await searchStacApi(
+    {
+      url: "https://planetarycomputer.microsoft.com/api/stac/v1/",
+      title: "Planetary Computer",
+      isApi: true,
+      searchUrl: "https://planetarycomputer.microsoft.com/api/stac/v1/search",
+      collections: [],
+      root: {},
+    },
+    { limit: 10 },
+    fetcher,
+  );
+  assert.equal(
+    result.items[0].assets.data.href,
+    "https://ai4edataeuwest.blob.core.windows.net/us-census/2020/cb_2020_us_state_500k.parquet",
+  );
+});
+
+test("storage options on the item resolve an asset that carries none of its own", async () => {
+  // The table extension allows the options to sit once on the item rather than on every asset.
+  const fetcher = (async () =>
+    jsonResponse({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "shared-options",
+          geometry: null,
+          collection: "us-census",
+          properties: {
+            datetime: "2021-08-01T00:00:00Z",
+            "table:storage_options": { account_name: "ai4edataeuwest" },
+          },
+          assets: {
+            data: { href: "abfs://us-census/2020/a.parquet", type: "application/x-parquet" },
+          },
+        },
+      ],
+      links: [],
+    })) as typeof fetch;
+  const result = await searchStacApi(
+    {
+      url: "https://planetarycomputer.microsoft.com/api/stac/v1/",
+      title: "Planetary Computer",
+      isApi: true,
+      searchUrl: "https://planetarycomputer.microsoft.com/api/stac/v1/search",
+      collections: [],
+      root: {},
+    },
+    { limit: 10 },
+    fetcher,
+  );
+  assert.equal(
+    result.items[0].assets.data.href,
+    "https://ai4edataeuwest.blob.core.windows.net/us-census/2020/a.parquet",
+  );
+});
+
 test("searchStacApi sends spatial, temporal, and collection filters and follows next", async () => {
   let body: Record<string, unknown> | undefined;
   const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -1164,6 +1317,11 @@ test("an asset's format comes from its media type, or its extension when there i
     "parquet",
   );
   assert.equal(assetDisplayFormat({ href: "https://example.com/data.parquet" }), "parquet");
+  assert.equal(
+    assetFormat({ href: "https://example.com/data.bin", type: "application/vnd.apache.parquet" }),
+    "parquet",
+  );
+  assert.equal(assetFormat({ href: "https://example.com/data.parquet" }), "parquet");
 
   // Archives under a directory named for another format are read by the asset, not the path.
   assert.equal(assetFormat({ href: "https://example.com/geotiff/a.pmtiles" }), "pmtiles");
@@ -1180,6 +1338,13 @@ test("an asset's format comes from its media type, or its extension when there i
 
   assert.equal(
     isVisualizableAsset({ href: "https://example.com/a.pmtiles", type: "application/vnd.pmtiles" }),
+    true,
+  );
+  assert.equal(
+    isVisualizableAsset({
+      href: "https://example.com/data.bin",
+      type: "application/vnd.apache.parquet",
+    }),
     true,
   );
 });

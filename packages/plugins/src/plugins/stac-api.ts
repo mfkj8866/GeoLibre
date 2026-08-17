@@ -29,6 +29,11 @@ export interface StacAsset {
   title?: string;
   type?: string;
   roles?: string[];
+  /**
+   * Table extension storage options. Catalogs that publish `abfs://` hrefs keep the Azure
+   * account out of the URL and name it here — the href's first segment is the *container*.
+   */
+  "table:storage_options"?: { account_name?: string };
 }
 
 export interface StacItem extends Feature<Geometry | null> {
@@ -137,17 +142,47 @@ function absoluteHref(href: string, base: string): string {
 }
 
 /**
- * Converts an anonymous S3 object URI into the HTTPS form browsers and raster
+ * Converts an anonymous object-store URI into the HTTPS form browsers and raster
  * range readers can fetch. STAC APIs such as Earth Search legitimately return
- * `s3://` asset hrefs even though the catalog itself is accessed over HTTPS.
+ * `s3://` asset hrefs even though the catalog itself is accessed over HTTPS, and
+ * Planetary Computer publishes GeoParquet as `abfs://`.
+ *
+ * `accountName` comes from the asset's `table:storage_options`. Azure hrefs name the
+ * *container* first and carry the account out of band, so without an account name there
+ * is nothing to resolve against and the href is returned untouched.
  */
-export function browserAssetHref(href: string, base: string): string {
+export function browserAssetHref(href: string, base: string, accountName?: string): string {
   const resolved = absoluteHref(href, base);
   const url = new URL(resolved);
-  if (url.protocol !== "s3:") return resolved;
-  const bucket = url.hostname;
-  if (!bucket) return resolved;
-  return `https://${bucket}.s3.amazonaws.com${url.pathname}${url.search}${url.hash}`;
+  if (url.protocol === "s3:") {
+    const bucket = url.hostname;
+    if (!bucket) return resolved;
+    return `https://${bucket}.s3.amazonaws.com${url.pathname}${url.search}${url.hash}`;
+  }
+  if (AZURE_SCHEMES.has(url.protocol)) {
+    // Canonical form names both parts: abfs[s]://<container>@<account>.dfs.core.windows.net/<path>.
+    // The shorthand names only the container and leans on the account beside it.
+    const canonical = url.hostname.endsWith(DFS_SUFFIX);
+    const container = canonical ? decodeURIComponent(url.username) : url.hostname;
+    const account = canonical ? url.hostname.slice(0, -DFS_SUFFIX.length) : accountName;
+    if (!container || !account) return resolved;
+    return `https://${account}.blob.core.windows.net/${container}${url.pathname}${url.search}${url.hash}`;
+  }
+  return resolved;
+}
+
+const DFS_SUFFIX = ".dfs.core.windows.net";
+
+/** fsspec/adlfs spellings for an Azure blob path, all container-first. */
+const AZURE_SCHEMES = new Set(["abfs:", "abfss:", "az:"]);
+
+/** Whether an href points at Azure blob storage, which may need a SAS token to read. */
+export function isAzureBlobHref(href: string): boolean {
+  try {
+    return new URL(href).hostname.endsWith(".blob.core.windows.net");
+  } catch {
+    return false;
+  }
 }
 
 async function fetchJson<T>(url: string, init: RequestInit, fetcher: FetchLike): Promise<T> {
@@ -197,11 +232,16 @@ function isStacItem(value: unknown): value is StacItem {
 }
 
 function normalizeItem(item: StacItem, base: string): StacItem {
+  // The table extension allows the storage options to sit on the item instead of on each asset.
+  const itemAccount = (
+    item.properties?.["table:storage_options"] as { account_name?: string } | undefined
+  )?.account_name;
   const assets = Object.fromEntries(
     Object.entries(item.assets ?? {}).flatMap(([key, asset]) => {
       if (!asset?.href) return [];
+      const account = asset["table:storage_options"]?.account_name ?? itemAccount;
       try {
-        return [[key, { ...asset, href: browserAssetHref(asset.href, base) }]];
+        return [[key, { ...asset, href: browserAssetHref(asset.href, base, account) }]];
       } catch {
         return [];
       }
@@ -550,8 +590,8 @@ export function itemBbox(item: StacItem): [number, number, number, number] | und
 }
 
 /** A format {@link assetFormat} recognizes, and {@link visualizeAsset} knows how to add. */
-export type StacAssetFormat = "pmtiles" | "geojson" | "cog";
-export type StacAssetDisplayFormat = StacAssetFormat | "parquet";
+export type StacAssetFormat = "pmtiles" | "geojson" | "cog" | "parquet";
+export type StacAssetDisplayFormat = StacAssetFormat;
 
 interface AssetFormatRule {
   format: StacAssetDisplayFormat;
@@ -580,10 +620,25 @@ export function assetDisplayFormat(asset: StacAsset): StacAssetDisplayFormat | n
 /**
  * Which format an asset is, or null when the panel cannot draw it. Both the enabled state of Add
  * and the routing behind it read this, so the button and the click cannot disagree.
+ *
+ * Narrower than {@link assetDisplayFormat}: an asset is named by its format even when it cannot
+ * be reached. {@link browserAssetHref} leaves an object-store URI alone when nothing resolves it
+ * — an `abfs://` href whose catalog omits `table:storage_options`, say — and none of the readers
+ * behind Add speak those schemes, so such an asset is labelled but not offered.
  */
 export function assetFormat(asset: StacAsset): StacAssetFormat | null {
-  const format = assetDisplayFormat(asset);
-  return format === "parquet" ? null : format;
+  if (!isFetchableHref(asset.href)) return null;
+  return assetDisplayFormat(asset);
+}
+
+/** Whether an href is one the readers behind Add can actually open. */
+function isFetchableHref(href: string): boolean {
+  try {
+    const { protocol } = new URL(href);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 export function isVisualizableAsset(asset: StacAsset): boolean {
