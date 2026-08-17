@@ -137,6 +137,47 @@ describe("readDxfCodepage", () => {
     assert.equal(readDxfCodepage(utf8Bytes("  0\nSECTION\n  0\nEOF\n")), null);
   });
 
+  it("ignores an MTEXT entity whose own content reads $DWGCODEPAGE", () => {
+    // The variable name only counts under group code 9, inside HEADER. Here it
+    // is group-1 entity text in ENTITIES, so the drawing stays unlabelled.
+    const bytes = utf8Bytes(
+      [
+        "  0",
+        "SECTION",
+        "  2",
+        "HEADER",
+        "  9",
+        "$ACADVER",
+        "  1",
+        "AC1018",
+        "  0",
+        "ENDSEC",
+        "  0",
+        "SECTION",
+        "  2",
+        "ENTITIES",
+        "  0",
+        "MTEXT",
+        "  1",
+        "$DWGCODEPAGE",
+        "  3",
+        "ANSI_936",
+        "  0",
+        "ENDSEC",
+        "  0",
+        "EOF",
+        "",
+      ].join("\n"),
+    );
+    assert.equal(readDxfCodepage(bytes), null);
+  });
+
+  it("reads a header behind a UTF-8 BOM", () => {
+    const bom = Uint8Array.from([0xef, 0xbb, 0xbf]);
+    const bytes = concatBytes([bom, dxfWithText("ANSI_936", utf8Bytes("x"))]);
+    assert.equal(readDxfCodepage(bytes), "ANSI_936");
+  });
+
   it("accepts unpadded and zero-padded HEADER group codes", () => {
     const unpadded = [
       "0",

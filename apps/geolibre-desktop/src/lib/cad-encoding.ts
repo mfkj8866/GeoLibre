@@ -60,14 +60,18 @@ const CODEPAGE_LABELS: Record<string, string> = {
  *
  * The `latin1` label is windows-1252 in disguise (see {@link CODEPAGE_LABELS}),
  * which is harmless here: the header variables and values this scans are ASCII.
+ * A leading UTF-8 BOM (`EF BB BF`, which that decode turns into `ï»¿`) is
+ * dropped so it cannot glue itself to the file's first group code — a DXF
+ * re-saved as UTF-8 by a text editor is exactly the case this module exists for.
  *
  * @param bytes The DXF file bytes.
  * @returns The first {@link HEADER_PROBE_BYTES} decoded as Latin-1.
  */
 function headerLatin1(bytes: Uint8Array): string {
-  return new TextDecoder("latin1").decode(
+  const text = new TextDecoder("latin1").decode(
     bytes.subarray(0, Math.min(bytes.length, HEADER_PROBE_BYTES)),
   );
+  return text.replace(/^(?:\uFEFF|ï»¿)/, "");
 }
 
 /**
@@ -84,21 +88,87 @@ function isBinaryDxf(bytes: Uint8Array): boolean {
   return true;
 }
 
+/** One HEADER variable: its value records, keyed by DXF group code. */
+type DxfHeaderVariable = Map<number, string>;
+
 /**
- * Read one HEADER variable from an ASCII DXF prefix.
+ * Parse the HEADER variables out of an ASCII DXF prefix.
+ *
+ * DXF is a flat stream of (group code, value) line pairs. A HEADER variable is
+ * introduced by a group-9 record naming it, followed by the value records that
+ * belong to it. Walking those pairs — rather than pattern-matching the text —
+ * is what keeps an entity from impersonating a variable: an `MTEXT` whose own
+ * content reads `$DWGCODEPAGE` sits under group 1, not group 9, and the scan
+ * stops at the HEADER section's `ENDSEC` before reaching ENTITIES anyway.
+ *
+ * A pair whose group code is not a number is skipped rather than treated as a
+ * value; pair alignment is fixed by the format, so one unreadable code does not
+ * desync the ones after it.
  *
  * @param header Latin-1 text of the file prefix.
- * @param name The variable without `$`, such as `ACADVER`.
- * @param groupCode The DXF group code of the value line (`1` or `3`).
- * @returns The trimmed value, or null when the variable is absent.
+ * @returns Each variable name (uppercased, without `$`) mapped to its records.
  */
-function readDxfTaggedValue(header: string, name: string, groupCode: number): string | null {
-  const pattern = new RegExp(
-    `\\$${name}[ \\t]*\\r?\\n[ \\t]*0*${groupCode}[ \\t]*\\r?\\n([^\\r\\n]+)`,
-    "i",
-  );
-  const value = pattern.exec(header)?.[1]?.trim();
-  return value || null;
+function readDxfHeaderVariables(header: string): Map<string, DxfHeaderVariable> {
+  const lines = header.split(/\r?\n/);
+  const variables = new Map<string, DxfHeaderVariable>();
+  let awaitingSectionName = false;
+  let inHeader = false;
+  let current: DxfHeaderVariable | null = null;
+
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = Number.parseInt(lines[i]!.trim(), 10);
+    const value = lines[i + 1]!.trim();
+    if (!Number.isInteger(code)) continue;
+
+    if (code === 0 && value.toUpperCase() === "SECTION") {
+      awaitingSectionName = true;
+      inHeader = false;
+      current = null;
+      continue;
+    }
+    if (awaitingSectionName) {
+      // The `2` record right after `0/SECTION` names the section.
+      if (code === 2) {
+        inHeader = value.toUpperCase() === "HEADER";
+        awaitingSectionName = false;
+      }
+      continue;
+    }
+    if (!inHeader) continue;
+    // HEADER is the first section, so its end is the end of anything readable.
+    if (code === 0 && value.toUpperCase() === "ENDSEC") break;
+
+    if (code === 9) {
+      const name = value.startsWith("$") ? value.slice(1).toUpperCase() : "";
+      if (!name) {
+        current = null;
+        continue;
+      }
+      current = variables.get(name) ?? new Map<number, string>();
+      variables.set(name, current);
+      continue;
+    }
+    // First record of a given code wins, so a repeated variable cannot shadow
+    // the value AutoCAD wrote first.
+    if (current && !current.has(code)) current.set(code, value);
+  }
+  return variables;
+}
+
+/**
+ * Read one HEADER variable's value record.
+ *
+ * @param variables From {@link readDxfHeaderVariables}.
+ * @param name The variable without `$`, such as `ACADVER`.
+ * @param groupCode The DXF group code of the value record (`1` or `3`).
+ * @returns The trimmed value, or null when the variable or record is absent.
+ */
+function readDxfHeaderValue(
+  variables: Map<string, DxfHeaderVariable>,
+  name: string,
+  groupCode: number,
+): string | null {
+  return variables.get(name)?.get(groupCode) || null;
 }
 
 /**
@@ -152,10 +222,10 @@ function normalizeCodepageToken(raw: string): string {
  */
 export function readDxfCodepage(bytes: Uint8Array): string | null {
   if (bytes.length === 0 || isBinaryDxf(bytes)) return null;
-  const header = headerLatin1(bytes);
-  const acadver = readDxfTaggedValue(header, "ACADVER", 1);
+  const variables = readDxfHeaderVariables(headerLatin1(bytes));
+  const acadver = readDxfHeaderValue(variables, "ACADVER", 1);
   if (acadver && isUtf8DxfVersion(acadver)) return "UTF-8";
-  const codepage = readDxfTaggedValue(header, "DWGCODEPAGE", 3);
+  const codepage = readDxfHeaderValue(variables, "DWGCODEPAGE", 3);
   return codepage ? normalizeCodepageToken(codepage) : null;
 }
 
