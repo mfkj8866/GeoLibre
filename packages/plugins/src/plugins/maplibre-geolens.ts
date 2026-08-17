@@ -28,6 +28,7 @@ import {
   type GeoLibreLayer,
 } from "@geolibre/core";
 import type { Map as MapLibreMap, RequestParameters, ResourceType } from "maplibre-gl";
+import { createLayerId } from "../layer-ids";
 import type { GeoLibreAppAPI, GeoLibrePlugin } from "../types";
 import {
   applyFeatureEdits,
@@ -436,12 +437,6 @@ function originOf(baseUrl: string): string | null {
 // ---------------------------------------------------------------------------
 // Layer creation + tile-token lifecycle.
 // ---------------------------------------------------------------------------
-
-function createLayerId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 /**
  * The current map view as a bbox, or null when there is no usable map.

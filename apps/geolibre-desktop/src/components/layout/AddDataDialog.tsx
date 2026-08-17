@@ -44,6 +44,16 @@ interface AddDataDialogProps {
    * clicked PostGIS table.
    */
   initialPostgres?: OpenAddDataPostgres;
+  /** Service URL supplied by a browser-extension deep link. */
+  initialUrl?: string;
+  /**
+   * The layer that deep link asked for — a WMS `LAYERS` value, a WFS feature
+   * type, a vector tile source layer. Prefilled so the form the extension opens
+   * is complete rather than an endpoint the user must still name a layer on.
+   */
+  initialLayer?: string;
+  /** Style document accompanying a deep-linked vector tileset. */
+  initialStyleUrl?: string;
 }
 
 /**
@@ -55,20 +65,29 @@ function renderSource(
   kind: AddDataKind,
   initialDeckVizKind: string | undefined,
   initialPostgres: OpenAddDataPostgres | undefined,
+  initialUrl: string | undefined,
+  initialLayer: string | undefined,
+  initialStyleUrl: string | undefined,
 ) {
   switch (kind) {
     case "xyz":
-      return <XyzSource />;
+      return <XyzSource initialUrl={initialUrl} />;
     case "wms":
-      return <WmsSource />;
+      return <WmsSource initialUrl={initialUrl} initialLayers={initialLayer} />;
     case "wfs":
-      return <WfsSource />;
+      return <WfsSource initialUrl={initialUrl} initialTypeName={initialLayer} />;
     case "wmts":
-      return <WmtsSource />;
+      return <WmtsSource initialUrl={initialUrl} />;
     case "ogc-features":
-      return <OgcFeaturesSource />;
+      return <OgcFeaturesSource initialUrl={initialUrl} />;
     case "ogc-vector-tiles":
-      return <OgcVectorTilesSource />;
+      return (
+        <OgcVectorTilesSource
+          initialUrl={initialUrl}
+          initialStyleUrl={initialStyleUrl}
+          initialSourceLayers={initialLayer}
+        />
+      );
     case "gpx":
       return <GpxSource />;
     case "georss":
@@ -84,7 +103,7 @@ function renderSource(
     case "mbtiles":
       return <MbtilesSource />;
     case "arcgis":
-      return <ArcGISSource />;
+      return <ArcGISSource initialUrl={initialUrl} />;
     case "postgres":
       return <PostgresSource initialPostgres={initialPostgres} />;
     case "video":
@@ -107,6 +126,9 @@ export function AddDataDialog({
   onOpenChange,
   initialDeckVizKind,
   initialPostgres,
+  initialUrl,
+  initialLayer,
+  initialStyleUrl,
 }: AddDataDialogProps) {
   const { t } = useTranslation();
   const open = kind !== null;
@@ -158,7 +180,14 @@ export function AddDataDialog({
 
         {kind ? (
           <AddDataShellProvider value={contextValue}>
-            {renderSource(kind, initialDeckVizKind, initialPostgres)}
+            {renderSource(
+              kind,
+              initialDeckVizKind,
+              initialPostgres,
+              initialUrl,
+              initialLayer,
+              initialStyleUrl,
+            )}
           </AddDataShellProvider>
         ) : null}
       </DialogContent>

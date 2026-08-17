@@ -1826,6 +1826,7 @@
       "ai": "AI Providers",
       "environmentVariables": "Environment Variables",
       "updates": "Update Settings",
+      "startupSettings": "Startup Settings",
       "managePlugins": "Manage Plugins",
       "styleManager": "Style Manager",
       "urlOverrideNote": "URL layout parameters override saved settings."
@@ -1845,7 +1846,7 @@
     },
     "startup": {
       "title": "Startup project",
-      "description": "Choose the workspace GeoLibre opens when the native app starts.",
+      "description": "Choose how GeoLibre opens a new session.",
       "mode": {
         "default": "Open the default workspace",
         "last": "Reopen the last project",
@@ -1857,7 +1858,10 @@
       },
       "chooseProject": "Choose Project",
       "noProjectSelected": "No project selected",
+      "globeByDefault": "Enable 3D globe by default",
+      "globeByDefaultHint": "Used for the untitled workspace when no startup project or project link is provided.",
       "selectError": "The selected project could not be read.",
+      "restoring": "Opening your startup project…",
       "loadWarning": "The startup project is unavailable. GeoLibre opened the default workspace instead."
     },
     "map": {
@@ -3424,8 +3428,9 @@
     "download": "Download",
     "adding": "Adding {{asset}}…",
     "added": "Added {{asset}} to the map.",
-    "addUnsupported": "Only GeoTIFF/COG and GeoJSON assets can be added to the map",
+    "addUnsupported": "Only GeoTIFF/COG, GeoJSON, and PMTiles assets can be added to the map",
     "addFailed": "Could not add asset",
+    "addNoSourceLayers": "This archive lists no layers to draw",
     "cogUnsupported": "This GeoLibre host cannot visualize remote GeoTIFF assets"
   },
   "earthdataGis": {
@@ -4993,6 +4998,13 @@
     "identifyInspectPixels": "Inspect pixel values",
     "identifyStopInspectPixels": "Stop inspecting pixel values",
     "identifyUnavailable": "Identify is only available for vector, WMS, and COG layers",
+    "selectFeaturesMenu": "Select features",
+    "selectFeaturesSingle": "Select features by click",
+    "selectFeaturesRectangle": "Select features by rectangle",
+    "selectFeaturesPolygon": "Select features by polygon",
+    "selectFeaturesFreehand": "Select features by freehand",
+    "selectFeaturesRadius": "Select features by radius",
+    "selectFeaturesModifiers": "Shift adds, Alt removes, and Shift+Alt intersects. Press Esc to cancel.",
     "exportGeoTiff": "GeoTIFF (COG)",
     "extractSubset": "Extract subset…",
     "stylesMenu": "Styles",

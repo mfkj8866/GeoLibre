@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { strToU8, zipSync } from "fflate";
 import {
   dataUrlParameters,
+  serviceUrlParameter,
   fetchRemoteData,
   mapboxStyleForDataLayer,
   parseRasterUrlStyle,
@@ -11,6 +12,92 @@ import {
 const collection = (id: string) => ({
   type: "FeatureCollection" as const,
   features: [{ type: "Feature" as const, id, properties: {}, geometry: null }],
+});
+
+describe("serviceUrlParameter", () => {
+  it("accepts supported service-prefill links", () => {
+    assert.deepEqual(
+      serviceUrlParameter(
+        "?add=xyz&serviceUrl=https%3A%2F%2Ftiles.example.com%2F%7Bz%7D%2F%7Bx%7D%2F%7By%7D.png",
+      ),
+      {
+        kind: "xyz",
+        url: "https://tiles.example.com/{z}/{x}/{y}.png",
+        layer: null,
+        styleUrl: null,
+      },
+    );
+  });
+
+  it("carries the requested layer and a vector tileset's style", () => {
+    assert.deepEqual(
+      serviceUrlParameter(
+        "?add=wfs&serviceUrl=https%3A%2F%2Fmaps.example.com%2Fwfs&serviceLayer=osm%3Awater_areas",
+      ),
+      {
+        kind: "wfs",
+        url: "https://maps.example.com/wfs",
+        layer: "osm:water_areas",
+        styleUrl: null,
+      },
+    );
+    assert.deepEqual(
+      serviceUrlParameter(
+        "?add=ogc-vector-tiles&serviceUrl=https%3A%2F%2Ftiles.example.com%2F%7Bz%7D%2F%7Bx%7D%2F%7By%7D.pbf&serviceStyle=https%3A%2F%2Ftiles.example.com%2Fstyle.json",
+      ),
+      {
+        kind: "ogc-vector-tiles",
+        url: "https://tiles.example.com/{z}/{x}/{y}.pbf",
+        layer: null,
+        styleUrl: "https://tiles.example.com/style.json",
+      },
+    );
+  });
+
+  it("restores tile-template braces only for the kinds that use them", () => {
+    // A WMS token that legitimately encodes a brace must reach the server as it
+    // was signed, not as a literal brace.
+    assert.equal(
+      serviceUrlParameter(
+        "?add=wms&serviceUrl=https%3A%2F%2Fmaps.example.com%2Fwms%3Ftoken%3Da%257Bb%257Dc",
+      )?.url,
+      "https://maps.example.com/wms?token=a%7Bb%7Dc",
+    );
+    assert.equal(
+      serviceUrlParameter(
+        "?add=wmts&serviceUrl=https%3A%2F%2Ftiles.example.com%2Fwmts%3FTileMatrix%3D%257Bz%257D",
+      )?.url,
+      "https://tiles.example.com/wmts?TileMatrix={z}",
+    );
+  });
+
+  it("ignores a blank layer and a non-web style link", () => {
+    assert.deepEqual(
+      serviceUrlParameter(
+        "?add=wms&serviceUrl=https://maps.example.com/wms&serviceLayer=%20&serviceStyle=file:///tmp/style.json",
+      ),
+      { kind: "wms", url: "https://maps.example.com/wms", layer: null, styleUrl: null },
+    );
+  });
+
+  it("restores lower-case encoded tile-template braces", () => {
+    assert.deepEqual(
+      serviceUrlParameter(
+        "?add=xyz&serviceUrl=https://tiles.example.com/%257bz%257d/%257bx%257d/%257by%257d.png",
+      ),
+      {
+        kind: "xyz",
+        url: "https://tiles.example.com/{z}/{x}/{y}.png",
+        layer: null,
+        styleUrl: null,
+      },
+    );
+  });
+
+  it("rejects unsupported kinds and non-web URLs", () => {
+    assert.equal(serviceUrlParameter("?add=bogus&serviceUrl=https://example.com"), null);
+    assert.equal(serviceUrlParameter("?add=xyz&serviceUrl=file:///tmp/tiles"), null);
+  });
 });
 
 describe("per-file ZIP styles", () => {

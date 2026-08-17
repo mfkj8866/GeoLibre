@@ -114,6 +114,7 @@ import { IS_MAS_BUILD } from "../../lib/build-flags";
 import { masHidesDataSource } from "../../lib/mas-build";
 import { IS_STORE_BUILD } from "../../lib/updates";
 import { AddDataDialog, type AddDataKind } from "./AddDataDialog";
+import { serviceUrlParameter } from "../../lib/data-url";
 import {
   OPEN_ADD_DATA_EVENT,
   type OpenAddDataDetail,
@@ -933,6 +934,7 @@ export function TopToolbar({
       added: (asset) => t("stacPlugin.added", { asset }),
       addUnsupported: t("stacPlugin.addUnsupported"),
       addFailed: t("stacPlugin.addFailed"),
+      addNoSourceLayers: t("stacPlugin.addNoSourceLayers"),
       cogUnsupported: t("stacPlugin.cogUnsupported"),
     });
   }, [t]);
@@ -1029,7 +1031,16 @@ export function TopToolbar({
       {} as Record<ToolbarMapControl, boolean>,
     ),
   );
-  const [addDataKind, setAddDataKind] = useState<AddDataKind | null>(null);
+  const [initialService, setInitialService] = useState(() =>
+    viewer || typeof window === "undefined" ? null : serviceUrlParameter(window.location.search),
+  );
+  const [addDataKind, setAddDataKind] = useState<AddDataKind | null>(() => {
+    const kind = initialService?.kind as AddDataKind | undefined;
+    // Every other path that opens this dialog from outside the component
+    // filters MAS-hidden sources first; a deep link must not be the way around
+    // that, even though no service kind is hidden today.
+    return kind && !masHidesDataSource(kind) ? kind : null;
+  });
   const [addDataTargetGroupId, setAddDataTargetGroupId] = useState<string | null>(null);
   const addDataInitialLayerIdsRef = useRef<Set<string>>(new Set());
   // Every path that opens the dialog outside the OPEN_ADD_DATA_EVENT listener
@@ -2085,6 +2096,13 @@ export function TopToolbar({
         mapControllerRef={mapControllerRef}
         initialDeckVizKind={addDataDeckVizKind}
         initialPostgres={addDataPostgres}
+        initialUrl={addDataKind === initialService?.kind ? initialService.url : undefined}
+        initialLayer={
+          addDataKind === initialService?.kind ? (initialService.layer ?? undefined) : undefined
+        }
+        initialStyleUrl={
+          addDataKind === initialService?.kind ? (initialService.styleUrl ?? undefined) : undefined
+        }
         onOpenChange={(open: boolean) => {
           if (!open) {
             if (addDataTargetGroupId) {
@@ -2097,6 +2115,7 @@ export function TopToolbar({
               }
             }
             setAddDataKind(null);
+            setInitialService(null);
             setAddDataTargetGroupId(null);
             setAddDataDeckVizKind(undefined);
             setAddDataPostgres(undefined);

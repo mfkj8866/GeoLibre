@@ -476,6 +476,7 @@ export {
   type StacLabels,
 } from "./plugins/maplibre-stac";
 export {
+  assetFormat,
   connectStac,
   isVisualizableAsset,
   itemBbox,
@@ -492,6 +493,7 @@ export {
   type StacIndexCatalog,
   type StacItem,
   type StacNextPage,
+  type StacAssetFormat,
   type StacSearchOptions,
   type StacSearchResult,
 } from "./plugins/stac-api";

@@ -1,4 +1,5 @@
 import { scanDocumentForDatasets } from "./scanner.mjs";
+import { mergeServiceCandidates } from "./service-scanner.mjs";
 import { buildGeoLibreUrl } from "./url-builder.mjs";
 
 const elements = {
@@ -81,7 +82,9 @@ function renderDatasets(found) {
     copy.className = "dataset-copy";
     const name = document.createElement("span");
     name.className = "dataset-name";
-    name.textContent = dataset.name;
+    // Naming the layer keeps several layers of one service apart, which their
+    // shared endpoint URL cannot do.
+    name.textContent = dataset.layer ? `${dataset.name}: ${dataset.layer}` : dataset.name;
     const host = document.createElement("span");
     host.className = "dataset-host";
     host.textContent = new URL(dataset.url).hostname;
@@ -131,11 +134,19 @@ async function inspectPage() {
   const pageUrl = new URL(tab.url);
   elements.pageHost.textContent = pageUrl.hostname || pageUrl.protocol;
   elements.pageHost.title = tab.url;
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: scanDocumentForDatasets,
-  });
-  renderDatasets(results[0]?.result ?? []);
+  let documentDatasets = [];
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: scanDocumentForDatasets,
+    });
+    documentDatasets = results[0]?.result ?? [];
+  } catch (error) {
+    console.debug("GeoLibre could not scan the current document.", error);
+  }
+  const key = `services:${tab.id}`;
+  const stored = await chrome.storage.session.get(key);
+  renderDatasets(mergeServiceCandidates(documentDatasets, stored[key] ?? []));
 }
 
 elements.selectAll.addEventListener("click", () => {

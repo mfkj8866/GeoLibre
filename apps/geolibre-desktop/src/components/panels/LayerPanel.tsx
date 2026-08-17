@@ -61,7 +61,7 @@ import {
   type TimePropertyCandidate,
   type TimePropertyRecord,
 } from "@geolibre/plugins";
-import type { MapController } from "@geolibre/map";
+import { startFeatureSelection, type MapController } from "@geolibre/map";
 import {
   applyMapboxStyleImport,
   applyQmlImport,
@@ -133,6 +133,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CircleDashed,
   ClipboardPaste,
   Copy,
   Database,
@@ -146,6 +147,7 @@ import {
   FolderPlus,
   GripVertical,
   Info,
+  LassoSelect,
   Layers,
   Library,
   Locate,
@@ -160,6 +162,7 @@ import {
   Pencil,
   PencilRuler,
   PenTool,
+  Pentagon,
   RefreshCw,
   Save,
   Shuffle,
@@ -1525,7 +1528,9 @@ export function LayerPanel({
           updateLayer(layer.id, {
             ...setLayerConnectionResult(latest, { error: message }),
             ...(latest.connection?.onFailure === "clear" && latest.geojson
-              ? { geojson: { type: "FeatureCollection" as const, features: [] } }
+              ? {
+                  geojson: { type: "FeatureCollection" as const, features: [] },
+                }
               : {}),
           });
         }
@@ -1730,7 +1735,9 @@ export function LayerPanel({
           return { text: mapboxStyleToJson(result), warnings: result.warnings };
         },
         {
-          defaultName: `${sanitizeExportFileName(geoLibreStyleSourceName(layer))}.geolibre.style.json`,
+          defaultName: `${sanitizeExportFileName(
+            geoLibreStyleSourceName(layer),
+          )}.geolibre.style.json`,
           filters: [{ name: "GeoLibre URL style", extensions: ["json"] }],
           browserTypes: [
             {
@@ -3025,8 +3032,8 @@ export function LayerPanel({
             // immediate parent, so a hidden grandparent gets the cue too. Given
             // the memoized `groupById` rather than the array, so folding every
             // row does not rebuild that map once per layer.
-            const groupHidden =
-              layer.visible && !effectiveLayerRenderState(layer, groupById).visible;
+            const layerRendered = effectiveLayerRenderState(layer, groupById).visible;
+            const groupHidden = layer.visible && !layerRendered;
             const visibilityToggleLabel = groupHidden
               ? `${t("layers.hiddenByGroup")} — ${t("layers.hideLayer")}`
               : layer.visible
@@ -3307,7 +3314,9 @@ export function LayerPanel({
                             isLayerLocked
                               ? t("collaborate.layerLockedHint")
                               : groupHidden
-                                ? `${t("layers.hiddenByGroup")} — ${t("layers.doubleClickToRename")}`
+                                ? `${t("layers.hiddenByGroup")} — ${t(
+                                    "layers.doubleClickToRename",
+                                  )}`
                                 : t("layers.doubleClickToRename")
                           }
                           onDoubleClick={(e: ReactMouseEvent) => {
@@ -3734,6 +3743,54 @@ export function LayerPanel({
                           )}
                           {canSelectFeatures && (
                             <>
+                              <DropdownMenuSub>
+                                <DropdownMenuSubTrigger>
+                                  <MousePointerClick className="h-3.5 w-3.5" />
+                                  {t("layers.selectFeaturesMenu")}
+                                </DropdownMenuSubTrigger>
+                                <DropdownMenuSubContent>
+                                  {(
+                                    [
+                                      ["single", MousePointerClick, "layers.selectFeaturesSingle"],
+                                      ["rectangle", SquareDashed, "layers.selectFeaturesRectangle"],
+                                      ["polygon", Pentagon, "layers.selectFeaturesPolygon"],
+                                      ["freehand", LassoSelect, "layers.selectFeaturesFreehand"],
+                                      ["radius", CircleDashed, "layers.selectFeaturesRadius"],
+                                    ] as const
+                                  ).map(([shape, Icon, label]) => (
+                                    <DropdownMenuItem
+                                      key={shape}
+                                      // Drawing on the map only makes sense
+                                      // against features the user can see, and
+                                      // a click gesture on a hidden layer would
+                                      // match nothing at all.
+                                      disabled={!layerRendered}
+                                      onSelect={() => {
+                                        if (identifyActive) setIdentifyLayer(null);
+                                        startFeatureSelection({
+                                          layerId: layer.id,
+                                          shape,
+                                        });
+                                      }}
+                                    >
+                                      <Icon className="me-2 h-3.5 w-3.5" />
+                                      {t(label)}
+                                    </DropdownMenuItem>
+                                  ))}
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    disabled={!holdsSelection}
+                                    onSelect={clearFeatureSelection}
+                                  >
+                                    <X className="me-2 h-3.5 w-3.5" />
+                                    {t("toolbar.item.clearSelection")}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuLabel className="max-w-64 whitespace-normal text-xs font-normal text-muted-foreground">
+                                    {t("layers.selectFeaturesModifiers")}
+                                  </DropdownMenuLabel>
+                                </DropdownMenuSubContent>
+                              </DropdownMenuSub>
                               {/* Not selectLayer() + open: that would clear the
                               live selection the dialogs' add/remove/intersect
                               modes combine with, so the target travels via the

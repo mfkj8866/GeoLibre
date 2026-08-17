@@ -5,6 +5,48 @@ export interface DataUrlParameter {
   dataUrl: string;
   styleUrl: string | null;
 }
+const SERVICE_KINDS = new Set([
+  "xyz",
+  "wms",
+  "wmts",
+  "wfs",
+  "ogc-features",
+  "ogc-vector-tiles",
+  "arcgis",
+]);
+
+export interface ServiceUrlParameter {
+  kind: string;
+  url: string;
+  /** The requested layer: WMS `LAYERS`, WFS `typeName`, a tile source layer. */
+  layer: string | null;
+  /** A style document naming the source layers of a vector tileset. */
+  styleUrl: string | null;
+}
+
+/** The service kinds addressed by a `{z}/{x}/{y}` tile template. */
+const TILE_TEMPLATE_KINDS = new Set(["xyz", "wmts", "ogc-vector-tiles"]);
+
+export function serviceUrlParameter(search: string): ServiceUrlParameter | null {
+  const params = new URLSearchParams(search);
+  const kind = params.get("add");
+  const rawUrl = params.get("serviceUrl");
+  // Only a tile template carries braces to restore. Rewriting them for every
+  // kind would corrupt a WMS or ArcGIS URL whose query legitimately encodes a
+  // brace, in a signed parameter or token, into one the server never sent.
+  const parsed = httpUrl(rawUrl);
+  const url =
+    parsed && kind && TILE_TEMPLATE_KINDS.has(kind)
+      ? parsed.replace(/%7B/gi, "{").replace(/%7D/gi, "}")
+      : parsed;
+  if (!kind || !SERVICE_KINDS.has(kind) || !url) return null;
+  return {
+    kind,
+    url,
+    layer: params.get("serviceLayer")?.trim() || null,
+    styleUrl: httpUrl(params.get("serviceStyle")),
+  };
+}
 export interface RemoteGeoJsonLayer {
   data: FeatureCollection;
   name: string;

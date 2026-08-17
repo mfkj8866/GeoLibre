@@ -456,7 +456,6 @@ export function SettingsDialog({
     // The Microsoft Store build has no in-app update flow to configure (policy
     // 10.2.5), so its settings section is dropped entirely.
     if (id === "updates" && IS_STORE_BUILD) return false;
-    if (id === "startup" && !isTauri()) return false;
     const gate = SECTION_GATE[id];
     return gate ? showSettingsItem(gate) : true;
   };
@@ -1504,6 +1503,17 @@ export function SettingsDialog({
               {t("settings.menu.updates")}
             </DropdownMenuItem>
           )}
+          {isSectionVisible("startup") && (
+            <DropdownMenuItem
+              onSelect={() => {
+                setSection("startup");
+                setOpen(true);
+              }}
+            >
+              <FolderOpen className="me-2 h-3.5 w-3.5" />
+              {t("settings.menu.startupSettings")}
+            </DropdownMenuItem>
+          )}
           {/* The Mac App Store build has no plugin marketplace (external
               plugin installs are not allowed there), so its entry point is
               dropped; composed with the profile gate like the Store build's
@@ -2542,7 +2552,7 @@ export function SettingsDialog({
                       {t("settings.startup.description")}
                     </p>
                   </div>
-                  <div className="space-y-2">
+                  <div className={isTauri() ? "space-y-2" : "hidden"}>
                     {(["default", "last"] as const).map((mode) => (
                       <label
                         key={mode}
@@ -2590,6 +2600,22 @@ export function SettingsDialog({
                       </Button>
                     </label>
                   </div>
+                  <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                    <input
+                      className="mt-0.5 h-4 w-4"
+                      type="checkbox"
+                      checked={draftDesktopSettings.startup.globeByDefault}
+                      onChange={(event) =>
+                        updateDraftStartupSettings({ globeByDefault: event.target.checked })
+                      }
+                    />
+                    <span className="space-y-1">
+                      <span className="block">{t("settings.startup.globeByDefault")}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {t("settings.startup.globeByDefaultHint")}
+                      </span>
+                    </span>
+                  </label>
                 </div>
               ) : null}
               {effectiveSection === "updates" ? (

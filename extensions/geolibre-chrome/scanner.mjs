@@ -75,22 +75,52 @@ export function scanDocumentForDatasets() {
     return url ? canonicalUrl(url) : null;
   };
 
+  const wordsIn = (value) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter(Boolean);
+
+  /**
+   * True when the link text reads back the URL's last path segment. A site
+   * root has no segment to read back and is never a dataset either way, so it
+   * counts as a page outright.
+   */
+  const echoesSlug = (path, clue) => {
+    const slug = wordsIn(path.split("/").filter(Boolean).pop() ?? "");
+    if (!slug.length) return true;
+    const said = wordsIn(clue);
+    return slug.every((word) => said.includes(word));
+  };
+
   const classify = (url, hint = "") => {
     const path = url.pathname.toLowerCase();
     const clue = String(hint).toLowerCase();
-    if (/\.geojson$/.test(path) || /geo\+json|geojson|feature\s*collection/.test(clue)) {
+    // A hint alone identifies an extensionless download endpoint, but on a URL
+    // that is plainly a web page the same words describe the page rather than
+    // name data it serves: a documentation site links "Add a GeoJSON line" to
+    // `/examples/add-a-geojson-line/`, which is HTML. A page extension says so
+    // outright; a directory-style URL says so only when the link text is the
+    // slug read back, which is what a page *about* a format looks like. An
+    // endpoint that merely ends in a slash (`/api/datasets/123/`) keeps its
+    // hint, since its slug names a resource rather than echoing the words.
+    const isPage =
+      /\.(?:html?|php|aspx?|jsp)$/.test(path) || (/\/$/.test(path) && echoesSlug(path, clue));
+    const says = (pattern) => !isPage && pattern.test(clue);
+    if (/\.geojson$/.test(path) || says(/geo\+json|geojson|feature\s*collection/)) {
       return { format: "GeoJSON", kind: "vector", confidence: 3 };
     }
-    if (/\.(?:geoparquet|parquet)$/.test(path) || /geoparquet|parquet/.test(clue)) {
+    if (/\.(?:geoparquet|parquet)$/.test(path) || says(/geoparquet|parquet/)) {
       return { format: "GeoParquet", kind: "vector", confidence: 3 };
     }
-    if (/\.pmtiles$/.test(path) || /pmtiles/.test(clue)) {
+    if (/\.pmtiles$/.test(path) || says(/pmtiles/)) {
       return { format: "PMTiles", kind: "vector", confidence: 3 };
     }
-    if (/\.(?:tif|tiff|cog)$/.test(path) || /geotiff|cloud.?optimized|\bcog\b/.test(clue)) {
+    if (/\.(?:tif|tiff|cog)$/.test(path) || says(/geotiff|cloud.?optimized|\bcog\b/)) {
       return { format: "GeoTIFF", kind: "raster", confidence: 3 };
     }
-    if (/\.zip$/.test(path) || /application\/zip|geojson.*zip|zip.*geojson/.test(clue)) {
+    if (/\.zip$/.test(path) || says(/application\/zip|geojson.*zip|zip.*geojson/)) {
       return { format: "ZIP", kind: "vector", confidence: 2 };
     }
     if (
@@ -100,7 +130,7 @@ export function scanDocumentForDatasets() {
     ) {
       return { format: "JSON", kind: "vector", confidence: 1 };
     }
-    return geoHint.test(clue)
+    return says(geoHint)
       ? {
           format: "Data API",
           kind: /geotiff|cloud.?optimized|\bcog\b/.test(clue) ? "raster" : "vector",

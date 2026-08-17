@@ -6,6 +6,7 @@ import {
   setExternalNativePaintBridge,
   useAppStore,
 } from "@geolibre/core";
+import { createPMTilesStoreLayer } from "@geolibre/map/pmtiles-layer";
 import type {
   QueryGeometry,
   QueryOptions,
@@ -4782,7 +4783,7 @@ function createPMTilesLayerAddHandler(): PMTilesLayerEventHandler {
     if (!layerInfo) return;
 
     const store = useAppStore.getState();
-    const layer = createPMTilesStoreLayer(event.layerId, layerInfo);
+    const layer = pmtilesStoreLayer(event.layerId, layerInfo);
     if (store.layers.some((item) => item.id === layer.id)) {
       store.updateLayer(layer.id, {
         metadata: layer.metadata,
@@ -5389,43 +5390,22 @@ function createGeoTiffRasterStoreLayer(state: GeoTiffRasterLayerState): GeoLibre
   };
 }
 
-function createPMTilesStoreLayer(id: string, layerInfo: PMTilesLayerInfo): GeoLibreLayer {
-  const firstSourceLayer = layerInfo.sourceLayers[0];
-  const fillColor =
-    (firstSourceLayer && layerInfo.sourceLayerColors?.[firstSourceLayer]) ??
-    DEFAULT_LAYER_STYLE.fillColor;
-
-  return {
+/** @internal Exported only so the control's layer shape can be unit-tested. */
+export function pmtilesStoreLayer(id: string, layerInfo: PMTilesLayerInfo): GeoLibreLayer {
+  return createPMTilesStoreLayer({
     id,
     name: layerInfo.name || layerNameFromUrl(layerInfo.url, id),
-    type: "pmtiles",
-    source: {
-      sourceId: layerInfo.id,
-      sourceLayers: layerInfo.sourceLayers,
-      tileType: layerInfo.tileType,
-      type: layerInfo.tileType === "raster" ? "raster" : "vector",
-      url: layerInfo.url,
-    },
-    visible: true,
+    url: layerInfo.url,
+    // The control also reports "unknown", which it and the map both draw as vector tiles.
+    tileType: layerInfo.tileType === "raster" ? "raster" : "vector",
+    sourceLayers: layerInfo.sourceLayers,
     opacity: layerInfo.opacity,
-    style: {
-      ...DEFAULT_LAYER_STYLE,
-      fillOpacity: layerInfo.tileType === "raster" ? 0.6 : 1,
-      fillColor,
-      strokeColor: fillColor,
-    },
-    metadata: {
-      externalNativeLayer: true,
-      nativeLayerIds: layerInfo.layerIds,
-      pickable: layerInfo.pickable,
-      sourceId: layerInfo.id,
-      sourceKind: "pmtiles-url",
-      sourceLayerColors: layerInfo.sourceLayerColors,
-      sourceLayers: layerInfo.sourceLayers,
-      tileType: layerInfo.tileType,
-    },
-    sourcePath: layerInfo.url,
-  };
+    style: { fillOpacity: layerInfo.tileType === "raster" ? 0.6 : 1 },
+    pickable: layerInfo.pickable,
+    // The control created these MapLibre layers itself, so its ids stand rather than derived ones.
+    nativeLayerIds: layerInfo.layerIds,
+    ...(layerInfo.sourceLayerColors ? { sourceLayerColors: layerInfo.sourceLayerColors } : {}),
+  });
 }
 
 function createZarrStoreLayer(id: string, layerInfo: ZarrLayerInfo): GeoLibreLayer {

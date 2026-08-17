@@ -1,4 +1,12 @@
 export { MapCanvas, type MapCanvasProps, type MapDiagnosticEvent } from "./MapCanvas";
+export {
+  FEATURE_SELECTION_EVENT,
+  featuresIntersectingPolygon,
+  selectionModeFromModifiers,
+  startFeatureSelection,
+  type FeatureSelectionRequest,
+  type FeatureSelectionShape,
+} from "./feature-selection";
 export { SecondaryMapCanvas, type SecondaryMapCanvasProps } from "./SecondaryMapCanvas";
 export { CesiumCanvas, type CesiumCanvasProps } from "./CesiumCanvas";
 export { isCesiumSupportedLayerType } from "./cesium-layer-sync";
@@ -70,13 +78,18 @@ export {
 export {
   ensureRemotePMTilesArchive,
   hasPMTilesArchive,
-  pmtilesNativeLayerIds,
-  readPMTilesArchiveInfo,
   registerPMTilesArchive,
   unregisterPMTilesArchive,
   setExternalDeckLayerOrderHandler,
-  type PMTilesArchiveInfo,
 } from "./layer-sync";
+export {
+  createPMTilesStoreLayer,
+  pmtilesNativeLayerIds,
+  readPMTilesArchiveInfo,
+  readRemotePMTilesInfo,
+  type PMTilesArchiveInfo,
+  type PMTilesStoreLayerOptions,
+} from "./pmtiles-layer";
 export {
   buildMapboxStyle,
   mapboxStyleToJson,

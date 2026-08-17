@@ -3,7 +3,9 @@ import { fillLayerId, lineLayerId } from "@geolibre/map";
 import type { FeatureCollection, Geometry } from "geojson";
 import type { GeoJSONSource, MapMouseEvent, Map as MapLibreMap } from "maplibre-gl";
 import type { GeoLibreAppAPI, GeoLibreCogLayerOptions, GeoLibrePlugin } from "../types";
+import { addPMTilesAsset } from "./stac-layers";
 import {
+  assetFormat,
   connectStac,
   horizontalBbox,
   isVisualizableAsset,
@@ -139,6 +141,7 @@ export interface StacLabels {
   download: string;
   addUnsupported: string;
   addFailed: string;
+  addNoSourceLayers: string;
   cogUnsupported: string;
   showing: (count: number) => string;
   showingOfMatched: (count: number, matched: number) => string;
@@ -209,8 +212,9 @@ let labels: StacLabels = {
   zoom: "Zoom",
   add: "Add",
   download: "Download",
-  addUnsupported: "Only GeoTIFF/COG and GeoJSON assets can be added to the map",
+  addUnsupported: "Only GeoTIFF/COG, GeoJSON, and PMTiles assets can be added to the map",
   addFailed: "Could not add asset",
+  addNoSourceLayers: "This archive lists no layers to draw",
   cogUnsupported: "This GeoLibre host cannot visualize remote GeoTIFF assets",
   showing: (count) => `Showing ${count} items.`,
   showingOfMatched: (count, matched) => `Showing ${count} of ${matched} items.`,
@@ -505,19 +509,39 @@ async function visualizeAsset(
   signal?: AbortSignal,
 ): Promise<void> {
   const name = `${item.id} — ${assetLabel(key, asset)}`;
-  const value = `${asset.type ?? ""} ${asset.href}`.toLowerCase();
-  if (value.includes("geo+json") || /\.geojson($|\?)/i.test(asset.href)) {
-    const response = await fetch(asset.href, {
-      headers: { Accept: "application/geo+json, application/json" },
-      signal,
-    });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    const data = (await response.json()) as FeatureCollection;
-    appRef?.addGeoJsonLayer(name, data, asset.href);
-  } else if (appRef?.addCogLayer) {
-    await appRef.addCogLayer(name, asset.href, cogOptions);
-  } else {
-    throw new Error(labels.cogUnsupported);
+  const format = assetFormat(asset);
+  switch (format) {
+    case "pmtiles": {
+      // No appRef check: the layer goes to the store, not through the app API.
+      if (!(await addPMTilesAsset(asset.href, name, signal))) {
+        throw new Error(labels.addNoSourceLayers);
+      }
+      return;
+    }
+    case "geojson": {
+      if (!appRef) throw new Error(labels.addFailed);
+      const response = await fetch(asset.href, {
+        headers: { Accept: "application/geo+json, application/json" },
+        signal,
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const data = (await response.json()) as FeatureCollection;
+      appRef.addGeoJsonLayer(name, data, asset.href);
+      return;
+    }
+    case "cog": {
+      if (!appRef?.addCogLayer) throw new Error(labels.cogUnsupported);
+      await appRef.addCogLayer(name, asset.href, cogOptions);
+      return;
+    }
+    case null:
+      throw new Error(labels.addUnsupported);
+    default: {
+      // A format added to VISUALIZABLE_FORMATS with no branch here fails to compile, rather than
+      // falling through to a renderer that cannot read it.
+      const unhandled: never = format;
+      throw new Error(`Unhandled asset format: ${String(unhandled)}`);
+    }
   }
 }
 
