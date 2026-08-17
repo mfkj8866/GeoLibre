@@ -14,7 +14,17 @@
 
 import type { Feature, FeatureCollection, GeoJsonProperties } from "geojson";
 
-const HEADER_PROBE_BYTES = 64 * 1024;
+/**
+ * How much of the file to decode when looking for the HEADER section.
+ *
+ * `$ACADVER` and `$DWGCODEPAGE` are the first two variables AutoCAD writes, so
+ * a much smaller probe would do for its own files — but a generator that emits
+ * an unusually large HEADER before them would fail *silently*, leaving the
+ * mojibake unrecoded with no error. A megabyte is far past any real HEADER
+ * while still costing one bounded decode, and {@link readDxfHeaderVariables}
+ * stops at the section's `ENDSEC`, so the extra room is never walked.
+ */
+const HEADER_PROBE_BYTES = 1024 * 1024;
 const BINARY_DXF_MAGIC = "AutoCAD Binary DXF";
 /** `$ACADVER` numeric suffix at which DXF switched from codepage to UTF-8. */
 const UTF8_DXF_VERSION = 1021;

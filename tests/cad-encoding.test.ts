@@ -172,6 +172,39 @@ describe("readDxfCodepage", () => {
     assert.equal(readDxfCodepage(bytes), null);
   });
 
+  it("finds $DWGCODEPAGE behind a HEADER larger than 64 KiB", () => {
+    // A generator that writes many variables before $DWGCODEPAGE used to push
+    // it past the probe, and detection then failed silently.
+    const padding: string[] = [];
+    for (let i = 0; i < 4000; i += 1) {
+      padding.push("  9", `$GEOLIBREPAD${i}`, "  1", "x".repeat(16));
+    }
+    const bytes = utf8Bytes(
+      [
+        "  0",
+        "SECTION",
+        "  2",
+        "HEADER",
+        "  9",
+        "$ACADVER",
+        "  1",
+        "AC1018",
+        ...padding,
+        "  9",
+        "$DWGCODEPAGE",
+        "  3",
+        "ANSI_936",
+        "  0",
+        "ENDSEC",
+        "  0",
+        "EOF",
+        "",
+      ].join("\n"),
+    );
+    assert.ok(bytes.length > 64 * 1024);
+    assert.equal(readDxfCodepage(bytes), "ANSI_936");
+  });
+
   it("reads a header behind a UTF-8 BOM", () => {
     const bom = Uint8Array.from([0xef, 0xbb, 0xbf]);
     const bytes = concatBytes([bom, dxfWithText("ANSI_936", utf8Bytes("x"))]);
