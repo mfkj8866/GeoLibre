@@ -53,6 +53,12 @@ const CODEPAGE_LABELS: Record<string, string> = {
   BIG5: "big5",
   ANSI_932: "shift_jis",
   SHIFT_JIS: "shift_jis",
+  // `euc-kr` is the full Windows-949 (UHC) superset here, not bare KS X 1001:
+  // WHATWG defines the euc-kr decoder over lead 0x81-0xFE / trail 0x41-0xFE and
+  // lists `windows-949` as one of its labels, so a browser decodes the
+  // UHC-only syllables too (verified in Chromium: 0x81 0x41 -> 갂). Node's
+  // ICU-backed `TextDecoder` is the narrower KS X 1001 and rejects those bytes,
+  // so cover Korean recoding in an `e2e/` spec rather than under `node --test`.
   ANSI_949: "euc-kr",
   ANSI_1252: "windows-1252",
   ANSI_1250: "windows-1250",
