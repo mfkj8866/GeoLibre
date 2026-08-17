@@ -15,6 +15,7 @@ import {
   wkbRowsToFeatureCollection,
 } from "./duckdb-geometry";
 import { confirmLargeDataset, type DuckDbVectorLoadOptions } from "./duckdb-vector-guard";
+import { readCadCodepage, recodeCadFeatureCollection, recodeCadString } from "./cad-encoding";
 import { ensureGpkgFeatureCount } from "./gpkg-ogr-contents";
 import { isLikelyGeoPackage, loadGeoPackageVectorFile } from "./gpkg-reader";
 import { prjSidecarCrs } from "./prj-sidecar";
@@ -606,6 +607,9 @@ export async function loadDuckDbVectorFile(
     // Inside the try so the finally still closes the connection if it throws.
     // `prjSidecarCrs` is `.shp`-scoped, so a non-shapefile's siblings are safe.
     const prjCrs = prjSidecarCrs(file);
+    // Read the drawing codepage before registerFileBuffer transfers (and
+    // detaches) the CAD bytes. DXF and DWG share this recode after ST_Read.
+    const cadCodepage = readCadCodepage(file.data, file.extension);
 
     await registerVectorFileBuffers(db, file);
     await ensureSpatialExtension(
@@ -655,7 +659,10 @@ export async function loadDuckDbVectorFile(
       );
       // Features may carry a null geometry; the app's layer model treats them
       // as a regular FeatureCollection and the map ignores null geometries.
-      return toFeatureCollection(rowsFromResult(result), detected.column) as FeatureCollection;
+      return recodeCadFeatureCollection(
+        toFeatureCollection(rowsFromResult(result), detected.column) as FeatureCollection,
+        cadCodepage,
+      );
     } catch (error) {
       // DuckDB Spatial's WKB reader rejects surface geometries (TIN /
       // PolyhedralSurface), which its bundled GDAL emits for ESRI MultiPatch
@@ -677,7 +684,10 @@ export async function loadDuckDbVectorFile(
       if (isParquetExtension(file.extension) || !isSurfaceError) {
         throw error;
       }
-      return loadViaKeepWkbFallback(db, file, options, sourceCrs, error, guardConfirmed);
+      return recodeCadFeatureCollection(
+        await loadViaKeepWkbFallback(db, file, options, sourceCrs, error, guardConfirmed),
+        cadCodepage,
+      );
     }
   } finally {
     await connection.close();
@@ -786,6 +796,7 @@ export async function readCadLayers(file: DuckDbVectorFile): Promise<CadLayerInf
   const db = await getDatabase();
   const connection = await db.connect();
   try {
+    const cadCodepage = readCadCodepage(file.data, file.extension);
     await registerVectorFileBuffers(db, file);
     await ensureSpatialExtension(db, connection);
     const rows = rowsFromResult(
@@ -801,7 +812,7 @@ export async function readCadLayers(file: DuckDbVectorFile): Promise<CadLayerInf
       ),
     );
     return rows.map((row) => ({
-      name: String(row.name ?? ""),
+      name: recodeCadString(String(row.name ?? ""), cadCodepage),
       featureCount:
         typeof row.feature_count === "bigint"
           ? Number(row.feature_count)
