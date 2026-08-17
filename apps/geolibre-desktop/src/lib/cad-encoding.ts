@@ -19,7 +19,19 @@ const BINARY_DXF_MAGIC = "AutoCAD Binary DXF";
 /** `$ACADVER` numeric suffix at which DXF switched from codepage to UTF-8. */
 const UTF8_DXF_VERSION = 1021;
 
-/** AutoCAD `$DWGCODEPAGE` → WHATWG `TextDecoder` label. */
+/**
+ * AutoCAD `$DWGCODEPAGE` → WHATWG `TextDecoder` label.
+ *
+ * `ISO8859-1` / `ISO-8859-1` / `ASCII` / `US-ASCII` are deliberately absent:
+ * WASM GDAL already turns each file byte into the matching Latin-1 code point,
+ * which *is* the correct Unicode for those codepages, so recoding has nothing
+ * to repair. Mapping them through `TextDecoder` would instead corrupt bytes
+ * 0x80–0x9F, because the WHATWG Encoding Standard aliases every `latin1` /
+ * `iso-8859-1` label to windows-1252, where that range holds printable
+ * characters rather than ISO-8859-1's C1 controls. `ANSI_1252` is a different
+ * matter and stays mapped: there the file really is windows-1252, so those
+ * bytes do need recoding.
+ */
 const CODEPAGE_LABELS: Record<string, string> = {
   "UTF-8": "utf-8",
   UTF8: "utf-8",
@@ -33,10 +45,6 @@ const CODEPAGE_LABELS: Record<string, string> = {
   SHIFT_JIS: "shift_jis",
   ANSI_949: "euc-kr",
   ANSI_1252: "windows-1252",
-  "ISO8859-1": "latin1",
-  "ISO-8859-1": "latin1",
-  ASCII: "latin1",
-  "US-ASCII": "latin1",
   ANSI_1250: "windows-1250",
   ANSI_1251: "windows-1251",
   ANSI_1253: "windows-1253",
@@ -49,6 +57,9 @@ const CODEPAGE_LABELS: Record<string, string> = {
 
 /**
  * Decode a Latin-1 prefix so ASCII DXF headers can be scanned.
+ *
+ * The `latin1` label is windows-1252 in disguise (see {@link CODEPAGE_LABELS}),
+ * which is harmless here: the header variables and values this scans are ASCII.
  *
  * @param bytes The DXF file bytes.
  * @returns The first {@link HEADER_PROBE_BYTES} decoded as Latin-1.

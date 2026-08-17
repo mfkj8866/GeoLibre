@@ -209,6 +209,18 @@ describe("recodeCadString", () => {
     assert.equal(recodeCadString(mojibake, "ANSI_9999"), mojibake);
   });
 
+  it("leaves ISO-8859-1 and ASCII drawings byte-identical", () => {
+    // WASM GDAL already maps each byte to the matching Latin-1 code point, so
+    // the string is correct as-is. Byte 0x92 is the case that would break if
+    // these were routed through a `TextDecoder`: WHATWG aliases every
+    // `latin1` / `iso-8859-1` label to windows-1252, which decodes it as `’`.
+    const latin1 = duckDbLatin1(Uint8Array.from([0x63, 0x61, 0x66, 0xe9, 0x92]));
+    assert.equal(latin1, "caf\u00e9\u0092");
+    for (const codepage of ["ISO8859-1", "ISO-8859-1", "ASCII", "US-ASCII"]) {
+      assert.equal(recodeCadString(latin1, codepage), latin1);
+    }
+  });
+
   it("is idempotent after a successful GBK recode", () => {
     const once = recodeCadString(duckDbLatin1(GONGCHENG_GBK), "ANSI_936");
     assert.equal(recodeCadString(once, "ANSI_936"), "工程名称");
